@@ -1,0 +1,473 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { createRoot } from 'react-dom/client';
+import { useForm } from 'react-hook-form';
+import { 
+  Tv, Play, Calendar, Clock, Trophy, Share2, ThumbsUp, MessageSquare, 
+  Settings, Plus, Trash2, LogOut, ChevronLeft, ExternalLink, Edit2, X, Send, User, AlertCircle,
+  Pause, Maximize, Volume2, VolumeX, FastForward, Activity, Monitor, Check, SkipForward,
+  Image as ImageIcon
+} from 'lucide-react';
+
+// --- Types ---
+type MatchStatus = 'LIVE NOW' | 'UPCOMING' | 'ENDED';
+type StreamType = 'm3u8' | 'mp4' | 'embed';
+
+interface Match {
+  id: string;
+  title: string;
+  date: string;
+  time: string;
+  tournament: string;
+  status: MatchStatus;
+  streamType: StreamType;
+  streamUrl: string;
+  description: string;
+  thumbnail?: string;
+}
+
+interface ChatMessage {
+  id: string;
+  user: string;
+  text: string;
+  timestamp: string;
+  isMe: boolean;
+}
+
+interface FormValues {
+  title: string;
+  date: string;
+  time: string;
+  tournament: string;
+  customTournament?: string;
+  status: MatchStatus;
+  streamType: StreamType;
+  streamUrl: string;
+  description: string;
+  thumbnail?: string;
+}
+
+// --- Components ---
+
+const AdSlot = ({ size, className = "" }: { size: string, className?: string }) => {
+  const [width, height] = size.split('x').map(Number);
+  return (
+    <div className={`mx-auto bg-[#1a1f26] border border-gray-800 flex items-center justify-center text-xs text-gray-500 overflow-hidden rounded-lg ${className}`} 
+         style={{ width: '100%', maxWidth: `${width}px`, height: `${height}px` }}>
+      <div className="text-center">
+        <p className="font-bold opacity-50">ADSTERRA SPONSOR</p>
+        <p className="opacity-30">{size}</p>
+      </div>
+    </div>
+  );
+};
+
+const VideoPlayer = ({ url, type }: { url: string, type: StreamType }) => {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const playerContainerRef = useRef<HTMLDivElement>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
+  const [levels, setLevels] = useState<any[]>([]);
+  const [currentLevel, setCurrentLevel] = useState(-1);
+  const [playbackSpeed, setPlaybackSpeed] = useState(1);
+  const [showControls, setShowControls] = useState(true);
+  const [isShowingAd, setIsShowingAd] = useState(true);
+  
+  const AD_TOTAL_DURATION = 15;
+  const SKIP_AFTER_SECONDS = 5;
+  const [adTimeElapsed, setAdTimeElapsed] = useState(0);
+  
+  const hlsRef = useRef<any>(null);
+  const controlsTimeout = useRef<any>(null);
+
+  const AD_URL = "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8";
+
+  const loadSource = (sourceUrl: string, isAd: boolean) => {
+    if (hlsRef.current) hlsRef.current.destroy();
+
+    if (type === 'm3u8' && videoRef.current) {
+      if ((window as any).Hls.isSupported()) {
+        const hls = new (window as any).Hls();
+        hls.loadSource(sourceUrl);
+        hls.attachMedia(videoRef.current);
+        hlsRef.current = hls;
+        hls.on((window as any).Hls.Events.MANIFEST_PARSED, () => {
+          setLevels(hls.levels);
+          if (videoRef.current && isPlaying) videoRef.current.play();
+        });
+        hls.on((window as any).Hls.Events.LEVEL_SWITCHED, (e: any, d: any) => setCurrentLevel(d.level));
+      } else if (videoRef.current.canPlayType('application/vnd.apple.mpegurl')) {
+        videoRef.current.src = sourceUrl;
+      }
+    } else if (type === 'mp4' && videoRef.current) {
+      videoRef.current.src = sourceUrl;
+    }
+  };
+
+  useEffect(() => {
+    if (type !== 'embed') loadSource(AD_URL, true);
+    return () => { if (hlsRef.current) hlsRef.current.destroy(); };
+  }, [url, type]);
+
+  useEffect(() => {
+    let timer: any;
+    if (isShowingAd && isPlaying && adTimeElapsed < AD_TOTAL_DURATION) {
+      timer = setInterval(() => setAdTimeElapsed(prev => prev + 1), 1000);
+    } else if (adTimeElapsed >= AD_TOTAL_DURATION && isShowingAd) {
+      skipAd();
+    }
+    return () => clearInterval(timer);
+  }, [isShowingAd, isPlaying, adTimeElapsed]);
+
+  const skipAd = () => {
+    setIsShowingAd(false);
+    setAdTimeElapsed(0);
+    loadSource(url, false);
+  };
+
+  const togglePlay = () => {
+    if (videoRef.current) {
+      if (videoRef.current.paused) { videoRef.current.play(); setIsPlaying(true); }
+      else { videoRef.current.pause(); setIsPlaying(false); }
+    }
+  };
+
+  if (!url) {
+    return (
+      <div className="video-container flex flex-col items-center justify-center glass">
+        <Tv className="w-16 h-16 text-gray-600 mb-4" />
+        <h3 className="text-xl font-bold text-gray-400">No Stream URL</h3>
+      </div>
+    );
+  }
+
+  if (type === 'embed') {
+    return (
+      <div className="video-container">
+        <iframe src={url} allowFullScreen allow="autoplay; encrypted-media"></iframe>
+      </div>
+    );
+  }
+
+  const canSkip = adTimeElapsed >= SKIP_AFTER_SECONDS;
+  const timeUntilSkip = SKIP_AFTER_SECONDS - adTimeElapsed;
+
+  return (
+    <div ref={playerContainerRef} className="video-container group relative cursor-pointer" onClick={togglePlay}>
+      <video ref={videoRef} className="rounded-lg w-full h-full object-contain" onPlay={() => setIsPlaying(true)} onPause={() => setIsPlaying(false)} autoPlay />
+
+      {isShowingAd && (
+        <div className="absolute inset-0 z-10 pointer-events-none">
+          <div className="absolute top-4 left-4 bg-black/60 px-3 py-1 rounded-md text-[10px] font-bold text-white border border-white/20 flex items-center gap-2">
+            <span className="w-2 h-2 bg-yellow-500 rounded-full animate-pulse"></span> ADVERTISEMENT
+          </div>
+          <div className="absolute bottom-16 right-4 pointer-events-auto">
+             <button onClick={(e) => { e.stopPropagation(); if(canSkip) skipAd(); }} disabled={!canSkip}
+                className={`flex items-center gap-2 px-6 py-3 rounded-xl font-bold text-sm transition ${!canSkip ? 'bg-black/40 text-gray-400 border border-white/10 cursor-not-allowed' : 'bg-[#00a3ff] text-white shadow-xl shadow-blue-500/20 active:scale-95'}`}>
+                {!canSkip ? `Skip in ${timeUntilSkip}s` : <><SkipForward size={18}/> Skip Ad</>}
+             </button>
+          </div>
+          <div className="absolute bottom-4 left-4 bg-black/60 px-2 py-1 rounded text-[9px] text-gray-300">Ad ends in {AD_TOTAL_DURATION - adTimeElapsed}s</div>
+        </div>
+      )}
+
+      {!isPlaying && (
+        <div className="absolute inset-0 flex items-center justify-center bg-black/40">
+          <div className="w-20 h-20 bg-[#00a3ff] rounded-full flex items-center justify-center shadow-2xl animate-pulse">
+            <Play size={40} className="text-white ml-1" fill="currentColor" />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const LiveChat = ({ matchId }: { matchId: string }) => {
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [input, setInput] = useState('');
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const saved = localStorage.getItem(`chat_${matchId}`);
+    if (saved) setMessages(JSON.parse(saved));
+    else setMessages([{ id: 'welcome', user: 'System', text: 'Welcome to the live chat!', timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), isMe: false }]);
+
+    const interval = setInterval(() => {
+      if (Math.random() > 0.7) {
+        const newMsg: ChatMessage = { id: Date.now().toString(), user: "CricFan_" + Math.floor(Math.random() * 100), text: "What a game! 🔥", timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), isMe: false };
+        setMessages(prev => {
+          const updated = [...prev, newMsg].slice(-30);
+          localStorage.setItem(`chat_${matchId}`, JSON.stringify(updated));
+          return updated;
+        });
+      }
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [matchId]);
+
+  useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [messages]);
+
+  const handleSend = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!input.trim()) return;
+    const myMsg: ChatMessage = { id: Date.now().toString(), user: 'You', text: input, timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), isMe: true };
+    const updated = [...messages, myMsg].slice(-30);
+    setMessages(updated);
+    localStorage.setItem(`chat_${matchId}`, JSON.stringify(updated));
+    setInput('');
+  };
+
+  return (
+    <div className="glass rounded-2xl flex flex-col h-[350px] border border-gray-800 overflow-hidden mt-4">
+      <div className="p-4 border-b border-gray-800 bg-white/5 flex items-center justify-between">
+        <h3 className="text-sm font-bold flex items-center gap-2 text-[#00a3ff]"><MessageSquare size={16} /> LIVE CHAT</h3>
+      </div>
+      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 hide-scrollbar">
+        {messages.map((msg) => (
+          <div key={msg.id} className={`flex flex-col ${msg.isMe ? 'items-end' : 'items-start'}`}>
+            <span className="text-[10px] text-gray-500 mb-1">{msg.user} • {msg.timestamp}</span>
+            <div className={`px-3 py-2 rounded-xl text-sm max-w-[85%] ${msg.isMe ? 'bg-[#00a3ff] text-white rounded-tr-none' : 'bg-gray-800 text-gray-200 rounded-tl-none'}`}>{msg.text}</div>
+          </div>
+        ))}
+      </div>
+      <form onSubmit={handleSend} className="p-3 border-t border-gray-800 bg-black/20 flex gap-2">
+        <input type="text" value={input} onChange={(e) => setInput(e.target.value)} placeholder="Say something..." className="flex-1 bg-white/5 border border-gray-800 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#00a3ff]" />
+        <button type="submit" className="bg-[#00a3ff] p-2 rounded-lg text-white"><Send size={18} /></button>
+      </form>
+    </div>
+  );
+};
+
+const App = () => {
+  const [view, setView] = useState<'home' | 'watch' | 'admin' | 'login'>('home');
+  const [matches, setMatches] = useState<Match[]>([]);
+  const [likedMatches, setLikedMatches] = useState<Set<string>>(new Set());
+  const [selectedMatch, setSelectedMatch] = useState<Match | null>(null);
+  const [filter, setFilter] = useState<string>('All');
+  const [password, setPassword] = useState('');
+  const [isCopied, setIsCopied] = useState(false);
+  
+  const { register, handleSubmit, watch, reset, formState: { errors } } = useForm<FormValues>({
+    defaultValues: { tournament: 'IPL', status: 'UPCOMING', streamType: 'm3u8' }
+  });
+
+  const selectedTournament = watch('tournament');
+
+  useEffect(() => {
+    const saved = localStorage.getItem('cricstream_matches');
+    if (saved) setMatches(JSON.parse(saved));
+    else {
+      const initial: Match[] = [
+        { id: '1', title: 'CSK VS RCB', date: 'Tonight', time: '07:30 PM', tournament: 'IPL', status: 'LIVE NOW', streamType: 'embed', streamUrl: 'https://www.youtube.com/embed/dQw4w9WgXcQ', description: 'IPL Big Clash!', thumbnail: 'https://images.unsplash.com/photo-1531415074968-036ba1b575da?w=800&q=80' },
+        { id: '2', title: 'MI VS DC', date: 'Tomorrow', time: '03:30 PM', tournament: 'WPL', status: 'UPCOMING', streamType: 'm3u8', streamUrl: '', description: 'WPL Action!', thumbnail: 'https://images.unsplash.com/photo-1540747913346-19e32dc3e97e?w=800&q=80' }
+      ];
+      setMatches(initial);
+      localStorage.setItem('cricstream_matches', JSON.stringify(initial));
+    }
+    const savedLikes = localStorage.getItem('cricstream_liked');
+    if (savedLikes) setLikedMatches(new Set(JSON.parse(savedLikes)));
+  }, []);
+
+  const saveMatches = (updated: Match[]) => {
+    setMatches(updated);
+    localStorage.setItem('cricstream_matches', JSON.stringify(updated));
+  };
+
+  const toggleLike = (id: string) => {
+    const newLiked = new Set(likedMatches);
+    if (newLiked.has(id)) newLiked.delete(id);
+    else newLiked.add(id);
+    setLikedMatches(newLiked);
+    localStorage.setItem('cricstream_liked', JSON.stringify(Array.from(newLiked)));
+  };
+
+  const onAddMatch = (data: FormValues) => {
+    const tournamentName = data.tournament === 'NEW' ? data.customTournament || 'Other' : data.tournament;
+    const newMatch: Match = {
+      id: Date.now().toString(),
+      ...data,
+      tournament: tournamentName,
+      thumbnail: data.thumbnail || 'https://images.unsplash.com/photo-1531415074968-036ba1b575da?w=800&q=80'
+    };
+    saveMatches([newMatch, ...matches]);
+    reset();
+    alert('Match Published!');
+  };
+
+  const deleteMatch = (id: string) => { if (confirm('Delete this match?')) saveMatches(matches.filter(m => m.id !== id)); };
+
+  const handleLogin = (e: any) => { e.preventDefault(); if (password === 'admin123') setView('admin'); else alert('Wrong Password'); };
+
+  const filteredMatches = filter === 'All' ? matches : matches.filter(m => m.tournament === filter);
+
+  return (
+    <div className="min-h-screen pb-12">
+      <nav className="sticky top-0 z-50 glass border-b border-gray-800 px-6 py-4 flex items-center justify-between">
+        <div className="flex items-center gap-3 cursor-pointer" onClick={() => setView('home')}>
+          <div className="w-10 h-10 bg-gradient-to-br from-[#00a3ff] to-blue-700 rounded-xl flex items-center justify-center shadow-lg">
+            <Tv className="w-6 h-6 text-white" />
+          </div>
+          <h1 className="text-2xl font-black tracking-tighter">CRIC<span className="text-[#00a3ff]">STREAM</span></h1>
+        </div>
+        <button onClick={() => view === 'admin' ? setView('home') : setView('login')} className="bg-[#00a3ff]/10 text-[#00a3ff] px-5 py-2.5 rounded-xl font-bold text-sm border border-[#00a3ff]/30 hover:bg-[#00a3ff]/20 transition neon-glow">
+          {view === 'admin' ? 'Logout' : 'Admin Panel'}
+        </button>
+      </nav>
+
+      <div className="max-w-5xl mx-auto px-6 pt-8">
+        {view === 'home' && (
+          <div className="space-y-12 animate-in fade-in duration-700">
+            {matches.find(m => m.status === 'LIVE NOW') && (
+              <div className="relative overflow-hidden rounded-3xl glass p-10 border border-[#00a3ff]/20 shadow-2xl">
+                <div className="flex items-center gap-2 mb-4">
+                  <span className="bg-red-600 text-white text-[11px] font-black px-3 py-1 rounded-full animate-pulse">LIVE NOW</span>
+                  <span className="text-gray-400 text-xs font-bold uppercase tracking-widest">{matches.find(m => m.status === 'LIVE NOW')?.tournament}</span>
+                </div>
+                <h2 className="text-5xl font-black mb-6 italic tracking-tighter">{matches.find(m => m.status === 'LIVE NOW')?.title}</h2>
+                <button onClick={() => { setSelectedMatch(matches.find(m => m.status === 'LIVE NOW')!); setView('watch'); }} className="bg-[#00a3ff] text-white px-10 py-4 rounded-2xl font-black text-lg flex items-center gap-3 hover:scale-105 transition shadow-2xl shadow-blue-500/30">
+                  <Play size={24} fill="currentColor"/> WATCH LIVE
+                </button>
+                <div className="absolute top-0 right-0 -mr-20 -mt-20 w-80 h-80 bg-[#00a3ff]/10 rounded-full blur-3xl"></div>
+              </div>
+            )}
+
+            <div>
+              <div className="flex items-center justify-between mb-8">
+                <h3 className="text-3xl font-black tracking-tight">UPCOMING MATCHES</h3>
+                <div className="flex gap-3 bg-gray-900/50 p-1.5 rounded-2xl">
+                  {['All', 'IPL', 'WPL'].map(t => (
+                    <button key={t} onClick={() => setFilter(t)} className={`px-6 py-2 rounded-xl text-xs font-black transition ${filter === t ? 'bg-[#00a3ff] text-white shadow-lg' : 'text-gray-500 hover:text-white'}`}>{t}</button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                {filteredMatches.map(match => (
+                  <div key={match.id} className="match-card group relative bg-[#1a1f26] rounded-3xl overflow-hidden border border-gray-800 hover:border-[#00a3ff]/40 transition duration-500 shadow-xl">
+                    <div className="relative h-48 overflow-hidden">
+                      <img src={match.thumbnail} alt={match.title} className="match-card-img w-full h-full object-cover opacity-60 group-hover:opacity-80 transition" />
+                      <div className="absolute inset-0 bg-gradient-to-t from-[#1a1f26] to-transparent"></div>
+                      <span className={`absolute top-4 left-4 text-[10px] font-black px-2 py-1 rounded-lg uppercase ${match.status === 'LIVE NOW' ? 'bg-red-600 text-white' : 'bg-blue-600/20 text-[#00a3ff] border border-[#00a3ff]/30'}`}>{match.status}</span>
+                    </div>
+                    <div className="p-6">
+                      <p className="text-[#00a3ff] text-[10px] font-black uppercase mb-2 tracking-widest">{match.tournament}</p>
+                      <h4 className="text-xl font-black uppercase mb-4 truncate">{match.title}</h4>
+                      <div className="flex items-center justify-between">
+                        <div className="text-[11px] text-gray-500 font-bold uppercase"><Calendar size={12} className="inline mr-1" /> {match.date}</div>
+                        <button onClick={() => { setSelectedMatch(match); setView('watch'); }} className="p-3 bg-white/5 rounded-xl group-hover:bg-[#00a3ff] transition duration-500">
+                          <Play size={18} className="text-white" fill="currentColor" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {view === 'watch' && selectedMatch && (
+          <div className="space-y-8 animate-in slide-in-from-bottom duration-500">
+            <button onClick={() => setView('home')} className="flex items-center gap-2 text-sm text-gray-400 hover:text-white transition font-bold"><ChevronLeft size={20}/> BACK TO MATCHES</button>
+            <VideoPlayer url={selectedMatch.streamUrl} type={selectedMatch.streamType} />
+            <div className="flex flex-col lg:flex-row gap-8">
+              <div className="flex-1 space-y-6">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-4xl font-black uppercase italic">{selectedMatch.title}</h2>
+                  <button 
+                    onClick={() => toggleLike(selectedMatch.id)} 
+                    className={`flex items-center gap-2 px-6 py-3 rounded-2xl font-black transition border ${likedMatches.has(selectedMatch.id) ? 'bg-[#00a3ff]/20 text-[#00a3ff] border-[#00a3ff]/40 shadow-blue-500/20 shadow-lg' : 'bg-white/5 border-gray-800 text-gray-400'}`}
+                  >
+                    <ThumbsUp size={20} fill={likedMatches.has(selectedMatch.id) ? "currentColor" : "none"}/> 
+                    {likedMatches.has(selectedMatch.id) ? 'LIKED' : 'LIKE'}
+                  </button>
+                </div>
+                <div className="p-6 rounded-3xl glass border border-gray-800">
+                  <h4 className="text-xs font-black text-[#00a3ff] uppercase mb-4 tracking-widest">Description</h4>
+                  <p className="text-gray-400 text-sm leading-relaxed">{selectedMatch.description}</p>
+                </div>
+                <LiveChat matchId={selectedMatch.id} />
+              </div>
+              <div className="lg:w-80 space-y-6">
+                <AdSlot size="300x250" className="w-full" />
+                <AdSlot size="300x600" className="hidden lg:flex w-full h-[600px]" />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {view === 'login' && (
+          <div className="max-w-md mx-auto py-32 animate-in zoom-in duration-500">
+            <div className="glass p-10 rounded-3xl border border-gray-800 shadow-2xl">
+              <h2 className="text-3xl font-black mb-8 text-center uppercase">ADMIN ACCESS</h2>
+              <form onSubmit={handleLogin} className="space-y-6">
+                <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full bg-black/50 border border-gray-800 rounded-2xl p-4 text-white focus:border-[#00a3ff] transition outline-none" placeholder="Password (admin123)" />
+                <button type="submit" className="w-full bg-[#00a3ff] text-white font-black py-4 rounded-2xl hover:scale-105 transition shadow-xl shadow-blue-500/20">LOGIN</button>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {view === 'admin' && (
+          <div className="space-y-10 animate-in fade-in duration-500 pb-20">
+            <div className="flex items-center justify-between">
+              <h2 className="text-4xl font-black tracking-tight uppercase">Control Center</h2>
+              <button onClick={() => setView('home')} className="bg-gray-800 px-6 py-2 rounded-xl text-xs font-bold hover:bg-red-600 transition">CLOSE</button>
+            </div>
+
+            <form onSubmit={handleSubmit(onAddMatch)} className="glass p-10 rounded-3xl border border-[#00a3ff]/20">
+              <h3 className="text-2xl font-black mb-8 uppercase flex items-center gap-3"><Plus className="text-[#00a3ff]" /> New Entry</h3>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <div className="space-y-6">
+                  <div><label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Match Title</label><input type="text" {...register('title', { required: true })} className="w-full bg-black/40 border border-gray-800 rounded-xl p-3 focus:border-[#00a3ff] outline-none" /></div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div><label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Date</label><input type="text" {...register('date', { required: true })} className="w-full bg-black/40 border border-gray-800 rounded-xl p-3" /></div>
+                    <div><label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Time</label><input type="text" {...register('time', { required: true })} className="w-full bg-black/40 border border-gray-800 rounded-xl p-3" /></div>
+                  </div>
+                  <div><label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Thumbnail URL</label><input type="text" {...register('thumbnail')} className="w-full bg-black/40 border border-gray-800 rounded-xl p-3" placeholder="https://..." /></div>
+                </div>
+                <div className="space-y-6">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Tournament</label>
+                      <select {...register('tournament')} className="w-full bg-black/40 border border-gray-800 rounded-xl p-3 outline-none focus:border-[#00a3ff]">
+                        <option value="IPL">IPL</option>
+                        <option value="WPL">WPL</option>
+                        <option value="NEW">Add New Tournament...</option>
+                      </select>
+                    </div>
+                    <div><label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Status</label><select {...register('status')} className="w-full bg-black/40 border border-gray-800 rounded-xl p-3"><option value="LIVE NOW">LIVE NOW</option><option value="UPCOMING">UPCOMING</option><option value="ENDED">ENDED</option></select></div>
+                  </div>
+                  {selectedTournament === 'NEW' && (
+                    <div className="animate-in slide-in-from-top duration-300">
+                      <label className="text-[10px] font-black text-[#00a3ff] uppercase tracking-widest">New Tournament Name</label>
+                      <input type="text" {...register('customTournament', { required: selectedTournament === 'NEW' })} className="w-full bg-[#00a3ff]/5 border border-[#00a3ff]/40 rounded-xl p-3 outline-none focus:border-[#00a3ff]" placeholder="e.g. World Cup 2024" />
+                    </div>
+                  )}
+                  <div><label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Stream URL</label><input type="text" {...register('streamUrl')} className="w-full bg-black/40 border border-gray-800 rounded-xl p-3 focus:border-[#00a3ff]" /></div>
+                  <button type="submit" className="w-full bg-green-600 hover:bg-green-700 text-white font-black py-4 rounded-2xl transition shadow-xl shadow-green-500/20">PUBLISH MATCH</button>
+                </div>
+              </div>
+            </form>
+
+            <div className="glass rounded-3xl overflow-hidden border border-gray-800">
+               <table className="w-full text-left">
+                  <thead><tr className="bg-white/5 text-[10px] font-black uppercase text-gray-500 border-b border-gray-800"><th className="px-8 py-5">Match Details</th><th className="px-8 py-5">Tournament</th><th className="px-8 py-5 text-right">Delete</th></tr></thead>
+                  <tbody className="divide-y divide-gray-800">
+                    {matches.map(m => (
+                      <tr key={m.id} className="hover:bg-white/5 transition"><td className="px-8 py-6"><p className="font-black uppercase tracking-tight">{m.title}</p><p className="text-[10px] text-gray-500">{m.date} - {m.time}</p></td><td className="px-8 py-6 text-sm font-bold text-[#00a3ff] uppercase">{m.tournament}</td><td className="px-8 py-6 text-right"><button onClick={() => deleteMatch(m.id)} className="p-3 text-red-500 hover:bg-red-500/10 rounded-xl"><Trash2 size={20}/></button></td></tr>
+                    ))}
+                  </tbody>
+               </table>
+            </div>
+          </div>
+        )}
+      </div>
+      <footer className="text-center py-10 opacity-20 text-[10px] font-black uppercase tracking-[0.3em] mt-20 border-t border-gray-900">
+        &copy; 2026 CRICSTREAM NETWORK PRO
+      </footer>
+    </div>
+  );
+};
+
+const root = createRoot(document.getElementById('root')!);
+root.render(<App />);

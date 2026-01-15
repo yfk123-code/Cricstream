@@ -1,0 +1,8 @@
+{
+  "name": "CricStream Pro",
+  "description": "Professional cricket streaming portal with thumbnails, live chat, and dynamic tournament management.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
